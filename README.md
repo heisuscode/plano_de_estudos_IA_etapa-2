@@ -33,7 +33,13 @@ Além dos aulões:
 
 O site guarda no navegador as questões respondidas, a porcentagem de cada aulão (0 a 100%), onde você parou, os flashcards e os simulados já feitos. Ao voltar, ele continua de onde você parou.
 
-O progresso fica **no navegador e no aparelho** em que você estudou. Trocar de navegador, limpar os dados de navegação ou usar aba anônima começa do zero.
+Sem login, o progresso fica **só no navegador e no aparelho** em que você estudou.
+
+Para usar o mesmo progresso no **PC e no celular**, toque em **☁️ Entrar com Google** no menu. O progresso passa a ser salvo também na nuvem (Firebase) e é juntado entre os aparelhos: o que você fizer em um aparece no outro.
+
+- Banco: Cloud Firestore do projeto Firebase `estudos-oiaa`, um documento por pessoa (`progresso/<id do usuário>`).
+- Segurança: as regras do Firestore só deixam cada pessoa ler e gravar o próprio documento. A configuração do Firebase que aparece no código é pública por natureza; quem protege os dados são essas regras.
+- Sem internet, o site continua funcionando e salvando no aparelho.
 
 ## Arquivos
 
