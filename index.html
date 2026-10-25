@@ -1716,7 +1716,14 @@ async function syncClaude() {
 
 /* 2) GitHub Pages: Firebase (login Google + Firestore, documento progresso/<uid>).
    Preencha com a configuração do app web do seu projeto Firebase. */
-const FIREBASE_CONFIG = null;
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyDivIzsQ8PJjyZWi6snXaf_rAQyFiCKeFw', // chave pública do app web; o acesso é protegido pelas regras do Firestore
+  authDomain: 'estudos-oiaa.firebaseapp.com',
+  projectId: 'estudos-oiaa',
+  storageBucket: 'estudos-oiaa.firebasestorage.app',
+  messagingSenderId: '20205736996',
+  appId: '1:20205736996:web:4bfe350723e3005951f4b1'
+};
 const FB_VER = '10.12.2';
 const carregar = src => new Promise((ok, erro) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = erro; document.head.append(e); });
 async function syncFirebase() {
