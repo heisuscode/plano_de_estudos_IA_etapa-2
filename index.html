@@ -80,6 +80,10 @@ h2.st{margin:4px 0 14px;font-size:22px}
 .toc button:hover{color:var(--text)}
 .toc button.cur{background:var(--panel2);color:var(--text)}
 .toc .ok{color:var(--ok)}
+.sync{display:flex;flex-direction:column;gap:1px;text-align:left;margin:4px 0 8px;padding:9px 11px;border-radius:10px;border:1px solid var(--acc);background:#10221f;color:var(--text);font-size:13px}
+.sync small{color:var(--mute);font-size:11.5px;overflow:hidden;text-overflow:ellipsis}
+.sync.on{border-color:#245236;background:#11241a}.sync.on span{color:var(--ok);font-weight:700}
+.sync .linkbtn{align-self:flex-start;margin-top:2px}
 .nav .pc{font-size:11.5px;color:var(--mute);font-variant-numeric:tabular-nums}
 .cont{display:flex;align-items:center;gap:16px;cursor:pointer;border-color:var(--c);flex-wrap:wrap}
 .quick{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
@@ -210,6 +214,8 @@ select.bl.wrong{background:#2a1414;color:var(--bad);border:1px solid var(--bad)}
   .app{grid-template-columns:minmax(0,1fr)}
   .side{position:sticky;height:auto;flex-direction:row;overflow-x:auto;padding:8px;gap:4px;z-index:5;align-items:center}
   .brand,.xp small,.sep,.nav .lbl small,.nav .mini,.nav .pc{display:none}
+  .sync{flex-direction:row;align-items:center;gap:8px;margin:0;white-space:nowrap;flex:none}
+  .sync small{display:none}
   .stepnav .btn{min-width:0;flex:1}
   .side{top:env(safe-area-inset-top,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));scrollbar-width:none}
   main{padding-block:20px 0}
@@ -261,7 +267,8 @@ const KEY = 'oiaa2026-estudo-v1';
 let S = {};
 try { S = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { }
 S = Object.assign({ q: {}, done: {}, pos: {}, cards: {}, last: 'home', scroll: {} }, S);
-let pushRemote = null; // ligado por syncNuvem() quando a página roda publicada
+let pushRemote = null; // ligado por ligarNuvem() quando há um banco disponível
+let fb = null; // { user, entrar(), sair() } quando o Firebase está configurado
 const save = (remote = true) => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } if (remote && pushRemote) pushRemote(); };
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), 1600); }
@@ -1495,6 +1502,7 @@ const xp = () => Object.values(S.q).filter(v => v.ok).length * 10 + Object.keys(
 function renderSide() {
   const wrong = Object.values(S.q).filter(v => !v.ok).length, cur = S.last;
   $('#side').innerHTML = `<div class="brand">OIAA 2026 · Fase 2<small>⭐ ${xp()} XP</small></div>
+  ${fb ? (fb.user ? `<div class="sync on"><span>☁️ Sincronizando</span><small>${fb.user.email || ''}</small><button class="linkbtn" data-sair>Sair</button></div>` : `<button class="sync" data-entrar>☁️ <b>Entrar com Google</b><small>para salvar no PC e no celular</small></button>`) : ''}
   <button class="nav ${cur === 'home' ? 'on' : ''}" data-go="home" style="--c:var(--acc)"><span class="dot"></span><span class="lbl">Início</span></button>
   ${AULAS.map(a => { const s = stats(a); return `<button class="nav ${cur === a.id ? 'on' : ''}" data-go="${a.id}" style="--c:${a.c}"><span class="dot"></span><span class="lbl">Aulão ${a.n}<small>${a.t}</small><div class="mini"><i style="width:${s.prog}%"></i></div></span><span class="pc">${s.prog}%</span></button>`; }).join('')}
   <div class="sep"></div>
@@ -1504,7 +1512,7 @@ function renderSide() {
   <button class="nav ${cur === 'erros' ? 'on' : ''}" data-go="erros" style="--c:var(--bad)"><span class="dot"></span><span class="lbl">Revisar erros</span>${wrong ? `<span class="badge">${wrong}</span>` : ''}</button>`;
 }
 const navOn = () => { if (innerWidth < 900) { const o = $('#side .nav.on'); o && o.scrollIntoView({ inline: 'center', block: 'nearest' }); } };
-$('#side').addEventListener('click', e => { const b = e.target.closest('[data-go]'); if (b) location.hash = b.dataset.go; });
+$('#side').addEventListener('click', e => { if (e.target.closest('[data-entrar]')) return fb.entrar(); if (e.target.closest('[data-sair]')) return fb.sair(); const b = e.target.closest('[data-go]'); if (b) location.hash = b.dataset.go; });
 
 function pageHome(M) {
   const last = AULAS.find(a => a.id === S.prev);
@@ -1683,26 +1691,60 @@ function mesclar(R) {
   if (!S.prev && R.prev) S.prev = R.prev;
   for (const k of ['simSeen', 'fcSeen']) S[k] = [...new Set([...(S[k] || []), ...(R[k] || [])])];
 }
-async function syncNuvem() {
-  if (!window.claude || !window.claude.use) return;
+/* liga um banco qualquer: lê uma vez, mescla, e depois grava (com pausa de 1,5 s) a cada mudança */
+async function ligarNuvem(ler, gravar) {
+  let writing = false, dirty = false, t;
+  const flush = async () => {
+    if (writing || !dirty) return; writing = true; dirty = false;
+    try { await gravar(JSON.stringify(S)); } catch (e) { console.warn('sync', e); }
+    writing = false; if (dirty) flush();
+  };
+  const remoto = await ler();
+  if (remoto) { const antes = JSON.stringify(S); mesclar(JSON.parse(remoto)); if (JSON.stringify(S) !== antes) { save(false); render(); toast('☁️ Progresso sincronizado'); } }
+  pushRemote = () => { dirty = true; clearTimeout(t); t = setTimeout(flush, 1500); };
+  pushRemote();
+}
+
+/* 1) link do Claude: banco privado por pessoa (data/users/<id>/progresso) */
+async function syncClaude() {
   const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
   if (!db || !user) return;
   const uid = await user.id(); if (!uid) return;
   const ref = db.doc('data/users/' + uid + '/progresso');
-  let writing = false, dirty = false, t;
-  const flush = async () => {
-    if (writing || !dirty) return; writing = true; dirty = false;
-    try { await ref.set({ s: JSON.stringify(S), t: Date.now() }); } catch (e) { if (e && e.code === 'invalid_argument') pushRemote = null; }
-    writing = false; if (dirty) flush();
-  };
-  try {
-    const snap = await ref.get();
-    if (snap.exists) { const antes = JSON.stringify(S); mesclar(JSON.parse(snap.data().s)); if (JSON.stringify(S) !== antes) { save(false); render(); toast('☁️ Progresso sincronizado'); } }
-  } catch (e) { return; }
-  pushRemote = () => { dirty = true; clearTimeout(t); t = setTimeout(flush, 1500); };
-  pushRemote();
+  try { await ligarNuvem(async () => { const s = await ref.get(); return s.exists ? s.data().s : null; }, s => ref.set({ s, t: Date.now() })); } catch (e) { }
 }
-syncNuvem();
+
+/* 2) GitHub Pages: Firebase (login Google + Firestore, documento progresso/<uid>).
+   Preencha com a configuração do app web do seu projeto Firebase. */
+const FIREBASE_CONFIG = null;
+const FB_VER = '10.12.2';
+const carregar = src => new Promise((ok, erro) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = erro; document.head.append(e); });
+async function syncFirebase() {
+  if (!FIREBASE_CONFIG) return;
+  try { for (const m of ['app', 'auth', 'firestore']) await carregar(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}-compat.js`); }
+  catch (e) { return; } // sem internet: segue só com o progresso local
+  firebase.initializeApp(FIREBASE_CONFIG);
+  const auth = firebase.auth(), store = firebase.firestore();
+  fb = {
+    user: null,
+    entrar: async () => {
+      const p = new firebase.auth.GoogleAuthProvider();
+      try { await auth.signInWithPopup(p); }
+      catch (e) { if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') await auth.signInWithRedirect(p); else if (e.code !== 'auth/popup-closed-by-user') toast('Não foi possível entrar: ' + e.code); }
+    },
+    sair: async () => { await auth.signOut(); toast('Você saiu. O progresso continua salvo neste aparelho.'); }
+  };
+  auth.onAuthStateChanged(async u => {
+    fb.user = u; pushRemote = null; renderSide();
+    if (!u) return;
+    const ref = store.collection('progresso').doc(u.uid);
+    try { await ligarNuvem(async () => { const s = await ref.get(); return s.exists ? s.data().s : null; }, s => ref.set({ s, t: Date.now() })); }
+    catch (e) { toast('Erro ao sincronizar: ' + (e.code || e.message)); }
+  });
+  renderSide();
+}
+
+if (window.claude && window.claude.use) syncClaude(); else syncFirebase();
 </script>
 </body>
 </html>
